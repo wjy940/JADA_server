@@ -1,0 +1,37 @@
+target/
+.mvn/wrapper/maven-wrapper.jar
+*.log
+.DS_Store
+/.idea/workspace.xml
+/.idea/tasks.xml
+/.idea/shelf/
+
+# Local IDE files and compiled artifacts
+/.idea/
+*.iml
+*.class
+*.jar
+__pycache__/
+*.pyc
+
+# Local credentials, database backups and uploaded files
+.env
+.env.*
+!.env.example
+!*.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.dump
+*.backup
+/uploads/
+/attachments/
+
+# Local acceptance data and account permission snapshots
+/scripts/*verification-result.json
+/scripts/verification-result.json
+/scripts/restart-permissions.json
+/scripts/api-module-schema.json
+/scripts/module-inventory.json
+/scripts/delivery-status.json

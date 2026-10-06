@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+# Check the same tracked content that will be committed.
+if ! git diff --quiet; then
+  echo 'FAIL: tracked files have unstaged changes. Stage the intended changes before checking the commit.' >&2
+  exit 1
+fi
+untracked_inputs="$(git ls-files --others --exclude-standard -- src scripts .githooks pom.xml openapi.json README.md 'API接口文档.md')"
+if [[ -n "$untracked_inputs" ]]; then
+  echo 'FAIL: new check inputs have not been staged. Stage intended source, tests and scripts first.' >&2
+  printf '%s\n' "$untracked_inputs" >&2
+  exit 1
+fi
+exec bash scripts/check-before-commit.sh

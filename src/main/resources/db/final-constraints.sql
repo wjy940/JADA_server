@@ -1,0 +1,15 @@
+BEGIN;
+UPDATE app_users SET is_test=true WHERE id IN ('viewer','approver') OR id LIKE 'QA-%';
+UPDATE app_roles SET is_test=true WHERE id='viewer' OR id LIKE 'QA-%';
+ALTER TABLE app_records ADD CONSTRAINT app_records_workflow_status_check CHECK(status IN ('draft','submitted','reviewing','approved','rejected','voided','archived'));
+ALTER TABLE app_finance_settlements ADD CONSTRAINT app_finance_balance_check CHECK(paid_amount>=0 AND (amount IS NULL OR (amount>=0 AND paid_amount<=amount)));
+CREATE INDEX IF NOT EXISTS app_records_module_updated_idx ON app_records(module_id,updated_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS app_records_project_idx ON app_records(project_name,module_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS app_records_warehouse_idx ON app_records((payload->>'warehouseId'),module_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS app_records_creator_idx ON app_records(created_by,module_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS app_approval_task_assignee_idx ON app_approval_tasks(assignee,instance_id) WHERE status='pending';
+CREATE INDEX IF NOT EXISTS app_notifications_recipient_idx ON app_notifications(user_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS app_audit_request_idx ON app_audit_logs(request_no);
+INSERT INTO app_workflow_transitions SELECT module_id,'reviewing','void','voided' FROM app_modules ON CONFLICT DO NOTHING;
+INSERT INTO app_schema_migrations(version) VALUES('business-v6') ON CONFLICT DO NOTHING;
+COMMIT;

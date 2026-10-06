@@ -1,0 +1,32 @@
+server:
+  port: ${SERVER_PORT:8080}
+  address: ${SERVER_ADDRESS:127.0.0.1}
+
+spring:
+  application:
+    name: severe-equipment-assets-api
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://127.0.0.1:55432/severe_equipment_assets}
+    username: ${DB_USERNAME:jd_admin}
+    password: ${DB_PASSWORD:jd_dev_password}
+    driver-class-name: org.postgresql.Driver
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+
+app:
+  include-test-data: ${INCLUDE_TEST_DATA:true}
+  security:
+    allow-header-auth: ${ALLOW_HEADER_AUTH:true}
+    public-ledger-read: ${PUBLIC_LEDGER_READ:true}
+    session-hours: ${SESSION_HOURS:12}
+  attachments:
+    directory: ${ATTACHMENT_DIR:${java.io.tmpdir}/severe-equipment-assets-files}
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+      - http://localhost:5174
+      - http://127.0.0.1:5174
+  # Header identity is local development only. prod uses persisted Bearer authentication.

@@ -1,0 +1,34 @@
+package com.jada.severe.service;
+import org.springframework.stereotype.Service;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
+import java.util.*;
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+@Service
+public class ExecutionService {
+ private final JdbcTemplate db;private final AccessService access;private final AuditService audit;private final DomainService domain;
+ public ExecutionService(JdbcTemplate db,AccessService access,AuditService audit,DomainService domain){this.db=db;this.access=access;this.audit=audit;this.domain=domain;}
+ public void allocate(String module,UUID source,UUID equipment,Map<String,Object> payload){
+  String personField=module.equals("vehicleDispatch")?"driverId":"operatorId",accountField=module.equals("vehicleDispatch")?"driverUserId":"operatorUserId";Object pid=payload.get(personField),uid=payload.get(accountField);if(pid==null||uid==null)throw new ResponseStatusException(HttpStatus.CONFLICT,"执行调度必须关联 "+personField+" 和 "+accountField);
+  domain.person(UUID.fromString(pid.toString()),module.equals("vehicleDispatch")?"司机":"工程设备操作员");
+  var qualification=audit.read(db.queryForObject("select payload::text from app_records where id=?",String.class,UUID.fromString(pid.toString())));if(!uid.toString().equals(qualification.get("userId")))throw new ResponseStatusException(HttpStatus.CONFLICT,"人员资质与执行账号不匹配");
+  if(!Boolean.TRUE.equals(db.queryForObject("select exists(select 1 from app_users u join app_user_roles ur on ur.user_id=u.id join app_role_permissions rp on rp.role_id=ur.role_id join app_permissions p on p.id=rp.permission_id where u.id=? and u.enabled and p.module_id=? and p.action='complete')",Boolean.class,uid.toString(),module)))throw new ResponseStatusException(HttpStatus.CONFLICT,"执行账号无任务完成权限");
+  var asset=db.queryForMap("select module_id,payload::text as payload from app_records where id=?",equipment);String expectedModule=module.equals("vehicleDispatch")?"vehicleEquipment":"engineeringEquipment";if(!expectedModule.equals(asset.get("module_id")))throw new ResponseStatusException(HttpStatus.CONFLICT,"设备类型与调度模块不匹配");var assetPayload=audit.read(asset.get("payload").toString());if(!"available".equals(Objects.toString(assetPayload.get("equipmentStatus"),"available")))throw new ResponseStatusException(HttpStatus.CONFLICT,"只有可用设备可以安排执行任务");
+  if(Boolean.TRUE.equals(db.queryForObject("select exists(select 1 from app_equipment_reservations where equipment_id=?)",Boolean.class,equipment)))throw new ResponseStatusException(HttpStatus.CONFLICT,"设备已被其他单据占用");
+  db.update("insert into app_equipment_reservations(equipment_id,source_id,previous_payload) select id,?,payload from app_records where id=?",source,equipment);
+  db.update("insert into app_todos(record_id,assignee) values(?,?) on conflict do nothing",source,uid.toString());db.update("insert into app_notifications(user_id,title,message,record_id) values(?,?,?,?)",uid.toString(),"执行任务","调度审批通过，请执行并回报完成",source);
+ }
+ @Transactional public Map<String,Object> complete(String module,UUID source,Map<String,Object> body){
+  if(!Set.of("vehicleDispatch","machineDispatch").contains(module))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"该模块不支持执行完成");access.require(module,"complete");access.record(module,source);
+  var before=db.queryForMap("select status,payload::text as payload from app_records where id=? for update",source);if(!before.get("status").equals("approved"))throw new ResponseStatusException(HttpStatus.CONFLICT,"调度单必须审批通过后才能完成");var payload=audit.read(before.get("payload").toString());if(!access.allowed("system","manage")&&!access.user().equals(payload.get(module.equals("vehicleDispatch")?"driverUserId":"operatorUserId")))access.deny();if("completed".equals(payload.get("executionStatus")))throw new ResponseStatusException(HttpStatus.CONFLICT,"任务已经完成");
+  UUID equipment=UUID.fromString(payload.get("equipmentId").toString());db.queryForObject("select id from app_records where id=? for update",UUID.class,equipment);var reservations=db.queryForList("select previous_payload::text as payload from app_equipment_reservations where equipment_id=? and source_id=?",equipment,source);if(reservations.isEmpty())throw new ResponseStatusException(HttpStatus.CONFLICT,"当前任务没有对应的设备占用");
+  BigDecimal hours=decimal(body.getOrDefault("actualHours",0)),distance=decimal(body.getOrDefault("actualDistanceKm",0));OffsetDateTime completed;try{completed=OffsetDateTime.parse(Objects.toString(body.get("completedAt")));}catch(Exception e){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"completedAt 必須包含时区");}if(completed.isAfter(OffsetDateTime.now().plusMinutes(5)))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"完成时间不能在未来");
+  db.update("insert into app_equipment_usage(source_id,equipment_id,completed_at,work_hours,distance_km,operator) values(?,?,?,?,?,?)",source,equipment,completed,hours,distance,access.user());
+  var previous=audit.read(reservations.get(0).get("payload").toString());var equipmentBefore=db.queryForMap("select payload::text as payload from app_records where id=?",equipment);String original=Objects.toString(previous.get("equipmentStatus"),"available");db.update("update app_records set payload=payload || ?::jsonb,updated_by=?,updated_at=now() where id=?",audit.json(Map.of("equipmentStatus",original,"activeDocumentId","","在用/闲置",original.equals("inUse")?"在用":"闲置")),access.user(),equipment);db.update("delete from app_equipment_reservations where equipment_id=? and source_id=?",equipment,source);
+  var changes=new LinkedHashMap<String,Object>();changes.put("completedAt",completed.toString());changes.put("actualHours",hours);changes.put("actualDistanceKm",distance);if(body.get("comment")!=null)changes.put("comment",body.get("comment"));changes.put("executionStatus","completed");db.update("update app_records set payload=payload || ?::jsonb,updated_by=?,updated_at=now() where id=?",audit.json(changes),access.user(),source);db.update("update app_todos set status='completed',completed_at=now() where record_id=? and assignee=? and status='pending'",source,payload.get(module.equals("vehicleDispatch")?"driverUserId":"operatorUserId"));audit.log(module,source,"executionComplete",before,changes,"approved","approved");String em=db.queryForObject("select module_id from app_records where id=?",String.class,equipment);audit.log(em,equipment,"executionRelease",equipmentBefore,db.queryForMap("select payload::text as payload from app_records where id=?",equipment),null,null);return changes;
+ }
+ private BigDecimal decimal(Object value){try{var number=new BigDecimal(value.toString());if(number.signum()<0)throw new IllegalArgumentException();return number;}catch(Exception e){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"工时和里程必须是非负数");}}
+}

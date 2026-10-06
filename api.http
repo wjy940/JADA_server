@@ -1,0 +1,156 @@
+@base = http://127.0.0.1:8080
+@token = REPLACE_WITH_LOGIN_TOKEN
+@recordId = REPLACE_WITH_UUID
+@moduleId = engineeringEquipment
+@taskId = REPLACE_WITH_TASK_UUID
+@settlementId = REPLACE_WITH_SETTLEMENT_UUID
+
+### 本机健康：data.database 必须为 severe_equipment_assets
+GET {{base}}/health
+
+### 正式登录；用真实账号与密码替换，不使用原型 mock 密码
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{"account":"REPLACE_WITH_ACCOUNT","password":"REPLACE_WITH_PASSWORD"}
+
+### 当前身份、数据库角色与数据范围
+GET {{base}}/api/auth/me
+Authorization: Bearer {{token}}
+
+### 模块元数据 / 字段顺序 / 状态规则
+GET {{base}}/api/modules
+Authorization: Bearer {{token}}
+
+### 模块列表（保留 list / total / cells）
+GET {{base}}/api/modules/{{moduleId}}/list?page=1&pageSize=10&keyword=&status=
+Authorization: Bearer {{token}}
+
+### 新建草稿：payload 完整业务字段可平铺或放入 payload 对象
+POST {{base}}/api/modules/{{moduleId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"title":"联调设备草稿","payload":{"资产编号":"REPLACE_WITH_UNIQUE_ASSET_NO","在用/闲置":"闲置","projectName":"REPLACE_WITH_PROJECT"}}
+
+### 编辑保留同一 ID；完整字段按 /api/modules 的 form_schema 填写
+PATCH {{base}}/api/modules/{{moduleId}}/{{recordId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"备注":"联调验证"}
+
+### 查询真实存档详情
+GET {{base}}/api/modules/{{moduleId}}/{{recordId}}
+Authorization: Bearer {{token}}
+
+### 提交前填齐该模块必填项；file 字段必须是真实上传附件 UUID
+POST {{base}}/api/modules/{{moduleId}}/{{recordId}}/submit
+Authorization: Bearer {{token}}
+
+### 查看审批节点 / 任务 ID；审批必须使用当前任务实际审批人的 token
+GET {{base}}/api/approval/flow?businessType={{moduleId}}&businessId={{recordId}}
+Authorization: Bearer {{token}}
+
+### 审批通过；多级流程中只推进当前节点，最终节点才执行联动
+POST {{base}}/api/approval/tasks/{{taskId}}/approve
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"comment":"核验通过"}
+
+### 驳回
+POST {{base}}/api/approval/tasks/{{taskId}}/reject
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"comment":"请补充证据"}
+
+### 退回申请人；targetStep 非负可退回更早节点
+POST {{base}}/api/approval/tasks/{{taskId}}/return
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"targetStep":-1,"comment":"资料不完整"}
+
+### 转交
+POST {{base}}/api/approval/tasks/{{taskId}}/transfer
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"assignee":"REPLACE_WITH_AUTHORIZED_USER","comment":"转交核验"}
+
+### 加签；强制等待该节点所有审批人完成
+POST {{base}}/api/approval/tasks/{{taskId}}/addSign
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"assignee":"REPLACE_WITH_AUTHORIZED_USER","comment":"追加审核"}
+
+### 仅符合当前状态规则的单据可作废
+POST {{base}}/api/modules/{{moduleId}}/{{recordId}}/void
+Authorization: Bearer {{token}}
+
+### 租赁/合同归档必须明确合同结束，释放对应占用
+POST {{base}}/api/modules/{{moduleId}}/{{recordId}}/archive
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"contractEnded":true}
+
+### 审计按源记录筛选
+GET {{base}}/api/audit/logs?moduleId={{moduleId}}&recordId={{recordId}}
+Authorization: Bearer {{token}}
+
+### 本人真实待办
+GET {{base}}/api/todos/my
+Authorization: Bearer {{token}}
+
+### 真实 XLSX 导出
+POST {{base}}/api/modules/{{moduleId}}/export/excel
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"keyword":"","status":""}
+
+### 上传附件：替换本地文件路径
+POST {{base}}/api/attachments
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=EquipmentBoundary
+
+--EquipmentBoundary
+Content-Disposition: form-data; name="moduleId"
+
+{{moduleId}}
+--EquipmentBoundary
+Content-Disposition: form-data; name="recordId"
+
+{{recordId}}
+--EquipmentBoundary
+Content-Disposition: form-data; name="file"; filename="proof.pdf"
+Content-Type: application/pdf
+
+< ./REPLACE_WITH_LOCAL_PROOF.pdf
+--EquipmentBoundary--
+
+### 财务确认应付；不是银行划款
+POST {{base}}/api/finance/settlements/{{settlementId}}/confirm
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"amount":"100.00","currency":"AED"}
+
+### 使用真实银行流水登记支付；重复 reference 不重复扣账
+POST {{base}}/api/finance/settlements/{{settlementId}}/payments
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"amount":"40.00","reference":"REPLACE_WITH_BANK_REFERENCE","paidAt":"REPLACE_WITH_ACTUAL_OFFSET_DATETIME"}
+
+### 工作台来自 PostgreSQL，GPS 保持外部来源
+GET {{base}}/api/workbench
+Authorization: Bearer {{token}}
+
+### 退出后 token 必须失效
+POST {{base}}/api/auth/logout
+Authorization: Bearer {{token}}

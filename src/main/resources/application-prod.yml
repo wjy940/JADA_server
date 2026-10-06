@@ -1,0 +1,15 @@
+app:
+  include-test-data: false
+  security:
+    allow-header-auth: false
+    public-ledger-read: false
+  attachments:
+    directory: ${ATTACHMENT_DIR}
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+server:
+  address: 127.0.0.1
+  shutdown: graceful
